@@ -1,0 +1,323 @@
+openapi: 3.0.3
+info:
+  title: API de Movimientos Financieros Concurrentes
+  description: >
+    API REST para operaciones de retiros y transferencias de alta concurrencia
+    con consistencia transaccional, idempotencia estricta y bloqueo pesimista en MySQL 8.4.
+  version: 1.0.0
+servers:
+  - url: http://localhost:8080/api/v1
+    description: Servidor local / Docker Compose
+
+paths:
+  /withdrawals:
+    post:
+      summary: Retiro de fondos de una cuenta
+      description: >
+        Debita fondos de una cuenta bancaria con bloqueo pesimista ordenado.
+        Garantiza idempotencia estricta mediante el header Idempotency-Key.
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Identificador único universal de idempotencia para la solicitud.
+        - name: X-Client-Id
+          in: header
+          required: false
+          schema:
+            type: string
+            default: default-client
+          description: Identificador del cliente u originador de la transacción.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WithdrawalRequest'
+      responses:
+        '201':
+          description: Retiro aplicado exitosamente
+          headers:
+            Location:
+              schema:
+                type: string
+              description: URI de la operación persistida
+            Idempotency-Replayed:
+              schema:
+                type: boolean
+              description: True si la respuesta proviene de una repetición idempotente
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationResponse'
+        '400':
+          description: Error de validación de contrato o encabezados
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+        '404':
+          description: Cuenta bancaria no encontrada
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+        '409':
+          description: Clave idempotente reutilizada con contenido diferente
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+        '422':
+          description: Rechazo de negocio persistido (fondos insuficientes o límite excedido)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationResponse'
+        '503':
+          description: Reintentos por contención de bloqueos agotados o base de datos temporalmente no disponible
+          headers:
+            Retry-After:
+              schema:
+                type: integer
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+
+  /transfers:
+    post:
+      summary: Transferencia entre dos cuentas
+      description: >
+        Ejecuta una transferencia atómica entre dos cuentas distintas.
+        Adquiere bloqueos en orden ascendente por UUID para evitar deadlocks de concurrencia cruzada.
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: X-Client-Id
+          in: header
+          required: false
+          schema:
+            type: string
+            default: default-client
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TransferRequest'
+      responses:
+        '201':
+          description: Transferencia aplicada exitosamente
+          headers:
+            Location:
+              schema:
+                type: string
+            Idempotency-Replayed:
+              schema:
+                type: boolean
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationResponse'
+        '400':
+          description: Error de validación (ej. origen igual a destino)
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+        '404':
+          description: Una de las cuentas no existe
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+        '409':
+          description: Clave idempotente reutilizada con diferente payload
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+        '422':
+          description: Rechazo de negocio (ej. fondos insuficientes en cuenta de origen)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationResponse'
+        '503':
+          description: Contención de concurrencia agotada
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+
+  /accounts/{accountId}:
+    get:
+      summary: Consultar saldo confirmado de una cuenta
+      parameters:
+        - name: accountId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Saldo actual y moneda de la cuenta
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccountResponse'
+        '404':
+          description: Cuenta no encontrada
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+
+  /operations/{operationId}:
+    get:
+      summary: Consultar resultado persistido de una operación
+      parameters:
+        - name: operationId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Operación persistida (tanto APPLIED como REJECTED devuelven 200 en GET)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationResponse'
+        '404':
+          description: Operación no encontrada
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+
+components:
+  schemas:
+    WithdrawalRequest:
+      type: object
+      required:
+        - accountId
+        - amount
+        - currency
+      properties:
+        accountId:
+          type: string
+          format: uuid
+          example: 11111111-1111-4111-8111-111111111111
+        amount:
+          type: string
+          pattern: '^(0|[1-9]\d*)(\.\d{2})$'
+          example: "5.00"
+        currency:
+          type: string
+          enum: [PEN]
+          example: PEN
+
+    TransferRequest:
+      type: object
+      required:
+        - sourceAccountId
+        - destinationAccountId
+        - amount
+        - currency
+      properties:
+        sourceAccountId:
+          type: string
+          format: uuid
+          example: 11111111-1111-4111-8111-111111111111
+        destinationAccountId:
+          type: string
+          format: uuid
+          example: 22222222-2222-4222-8222-222222222222
+        amount:
+          type: string
+          pattern: '^(0|[1-9]\d*)(\.\d{2})$'
+          example: "10.00"
+        currency:
+          type: string
+          enum: [PEN]
+          example: PEN
+
+    OperationResponse:
+      type: object
+      properties:
+        operationId:
+          type: string
+          format: uuid
+        type:
+          type: string
+          enum: [WITHDRAWAL, TRANSFER]
+        status:
+          type: string
+          enum: [PENDING, APPLIED, REJECTED]
+        sourceAccountId:
+          type: string
+          format: uuid
+          nullable: true
+        destinationAccountId:
+          type: string
+          format: uuid
+          nullable: true
+        amount:
+          type: string
+          example: "5.00"
+        currency:
+          type: string
+          example: PEN
+        resultCode:
+          type: string
+          example: OK
+        createdAt:
+          type: string
+          format: date-time
+
+    AccountResponse:
+      type: object
+      properties:
+        accountId:
+          type: string
+          format: uuid
+        balance:
+          type: string
+          example: "5000.00"
+        currency:
+          type: string
+          example: PEN
+
+    ProblemDetail:
+      type: object
+      properties:
+        type:
+          type: string
+          format: uri
+        title:
+          type: string
+        status:
+          type: integer
+        detail:
+          type: string
+        instance:
+          type: string
+        code:
+          type: string
+        retryable:
+          type: boolean
+        errors:
+          type: object
+          additionalProperties:
+            type: string

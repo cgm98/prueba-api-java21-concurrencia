@@ -1,0 +1,17 @@
+spring:
+  application:
+    name: financial-movements-test
+  threads:
+    virtual:
+      enabled: true
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    baseline-on-migrate: true
+
+app:
+  retry:
+    max-attempts: 3
+    initial-backoff-ms: 10
+    max-backoff-ms: 100
+    multiplier: 1.5

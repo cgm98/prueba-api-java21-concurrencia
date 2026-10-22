@@ -1,0 +1,83 @@
+# ==========================================
+# 1. Compilación y Artefactos de Build (Maven / Gradle / Eclipse)
+# ==========================================
+target/
+build/
+dist/
+out/
+bin/
+!.mvn/wrapper/maven-wrapper.jar
+!**/src/main/**/target/
+!**/src/test/**/target/
+
+# ==========================================
+# 2. Carpetas Temporales y Scratch
+# ==========================================
+temp/
+tmp/
+
+# ==========================================
+# 3. Asistentes Locales y Configuración de Agentes
+# ==========================================
+.agents/
+
+# ==========================================
+# 4. Entornos y Credenciales
+# ==========================================
+.env
+.env.local
+.env.*.local
+
+# ==========================================
+# 5. IDEs y Editores de Código
+# ==========================================
+### IntelliJ IDEA ###
+.idea/
+*.iws
+*.iml
+*.ipr
+out/
+
+### VS Code ###
+.vscode/
+
+### Eclipse / Spring Tool Suite (STS) ###
+.apt_generated/
+.classpath
+.factorypath
+.project
+.settings/
+.springBeans
+.sts4-cache/
+
+### NetBeans ###
+/nbproject/private/
+/nbbuild/
+/nbdist/
+/.nb-gradle/
+
+# ==========================================
+# 6. Logs y Volcados del Sistema Operativo / JVM
+# ==========================================
+*.log
+logs/
+hs_err_pid*.log
+replay_pid*.log
+
+# ==========================================
+# 7. Basura del Sistema Operativo (Windows / macOS / Linux)
+# ==========================================
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Docker volumen local
+mysql_data/
+
